@@ -58,7 +58,7 @@ SYNTAX
     .\Get-MailboxDelegatePermission.ps1 -MailboxListFile <String> [<CommonParameters>]
 ```
 
-## Examples
+## Usage Examples
 
 ```PowerShell
 # This example retrieves the delegate access list from the provided mailbox identities.
@@ -90,3 +90,7 @@ $mailboxList = Get-Mailbox -ResultSize 2 -RecipientTypeDetails SharedMailbox -Wa
 \Get-MailboxDelegatePermission.ps1 -Limit 10
 \Get-MailboxDelegatePermission.ps1 -Limit All
 ```
+
+## Sample Result
+
+![Sample result](doc/resource/images/sample_result.png)
