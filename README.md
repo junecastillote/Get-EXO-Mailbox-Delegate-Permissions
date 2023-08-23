@@ -60,9 +60,9 @@ SYNTAX
 
 ## Usage Examples
 
-```PowerShell
-# This example retrieves the delegate access list from the provided mailbox identities.
+This example retrieves the delegate access list from the provided mailbox identities.
 
+```PowerShell
 $mailboxList = @(
     'mailbox1@domain.tld',
     'mailbox2@domain.tld',
@@ -71,24 +71,24 @@ $mailboxList = @(
 .\Get-MailboxDelegatePermission.ps1 -MailboxID $mailboxList
 ```
 
-```PowerShell
-# This example retrieves the delegate access list from the provided mailbox objects resulting from the Get-Mailbox command.
+This example retrieves the delegate access list from the provided mailbox objects resulting from the Get-Mailbox command.
 
+```PowerShell
 $mailboxList = Get-Mailbox -ResultSize 2 -RecipientTypeDetails SharedMailbox -WarningAction SilentlyContinue
 .\Get-MailboxDelegatePermission.ps1 -MailboxObject $mailboxList
 ```
 
-```PowerShell
-# This example retrieves the delegate access list from the provided mailbox list file.
+This example retrieves the delegate access list from the provided mailbox list file.
 
+```PowerShell
 .\Get-MailboxDelegatePermission.ps1 -MailboxListFile .\mailboxList.txt
 ```
 
-```PowerShell
-# This example retrieves the delegate access list from the top N or All mailboxes.
+This example retrieves the delegate access list from the top N or All mailboxes.
 
-\Get-MailboxDelegatePermission.ps1 -Limit 10
-\Get-MailboxDelegatePermission.ps1 -Limit All
+```PowerShell
+.\Get-MailboxDelegatePermission.ps1 -Limit 10
+.\Get-MailboxDelegatePermission.ps1 -Limit All
 ```
 
 ## Sample Result
