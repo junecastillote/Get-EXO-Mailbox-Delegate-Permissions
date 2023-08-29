@@ -1,7 +1,7 @@
 
 <#PSScriptInfo
 
-.VERSION 1.0
+.VERSION 0.2
 
 .GUID 558e9982-9a8c-43d6-8b8d-ce00c90a9a4f
 
@@ -114,6 +114,14 @@ param (
     $Limit = 10
 )
 
+Function TextSplit {
+    param(
+        $Text
+    )
+    [System.Text.RegularExpressions.Regex]::Split($Text, "(?<=.)(?=[A-Z])") -join " " -replace '\s+', ' '
+    # [System.Text.RegularExpressions.Regex]::Split($Text, "(?<!,)(?<=.)(?=[A-Z])") -join " "
+}
+
 if ($PSCmdlet.ParameterSetName -eq 'byMailboxId') {
     $mailbox = @(
         $MailboxID | ForEach-Object {
@@ -141,6 +149,7 @@ if ($PSCmdlet.ParameterSetName -eq 'byMailboxObject') {
 
 if ($PSCmdlet.ParameterSetName -eq 'byLimit') {
     try {
+        if ($Limit -eq 'All') { $Limit = "Unlimited" }
         $mailbox = @(Get-Mailbox -ResultSize $Limit -ErrorAction Stop -WarningAction SilentlyContinue)
     }
     catch {
@@ -155,23 +164,25 @@ if (!$mailbox) {
 }
 
 $result = [System.Collections.ArrayList]@()
+if ($PSVersionTable.PSVersion -ge 7.2) {
+    $psStyle.Progress.View = 'Classic'
+}
 for ($i = 0; $i -lt $mailbox.count; $i++) {
     $currentMailbox = $mailbox[$i]
-    "Processing mailbox $($i+1)/$($mailbox.count): [$($currentMailbox.PrimarySmtpAddress)]" | Out-Default
+    # "Processing mailbox $($i+1)/$($mailbox.count): [$($currentMailbox.PrimarySmtpAddress)]" | Out-Default
+    $pct = (($i + 1) / $mailbox.count) * 100
+    Write-Progress -Activity "Processing mailbox $($i+1) of $($mailbox.count):" -Status "[$($currentMailbox.PrimarySmtpAddress)]" -PercentComplete $($pct) -Id 0
 
-    $sendAsPermissions = @(Get-RecipientPermission -Identity $currentMailbox.ExchangeGuid -ResultSize Unlimited | Where-Object { $_.AccessControlType -eq 'Allow' -and $_.Trustee -like "*@*" })
     $mailboxPermissions = @(Get-MailboxPermission -Identity $currentMailbox.ExchangeGuid -ResultSize Unlimited | Where-Object { $_.User -like "*@*" -and !$_.Deny -and !$_.IsInherited })
+    $sendAsPermissions = @(Get-RecipientPermission -Identity $currentMailbox.ExchangeGuid -ResultSize Unlimited | Where-Object { $_.AccessControlType -eq 'Allow' -and $_.Trustee -like "*@*" })
 
     try {
-        if (!($inboxFolderPermissions = @(Get-MailboxFolderPermission -Identity "$($currentMailbox.ExchangeGuid):\Inbox" -ErrorAction SilentlyContinue))) {
-            $inboxFolder = (((Get-MailboxFolderStatistics -Identity $currentMailbox.ExchangeGuid) | Where-Object { $_.FolderType -eq 'Inbox' }).FolderPath -replace '/', '')
-            "     -> Non-English Mailbox. Inbox folder name is - [\$inboxFolder]" | Out-Default
-            $inboxFolderPermissions = Get-MailboxFolderPermission -Identity "$($currentMailbox.ExchangeGuid):\$($inboxFolder)" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $_.User.DisplayName -ne 'Anonymous' -and $_.User.DisplayName -ne 'Default' -and $_.IsValid -eq $true }
-            if ($inboxFolderPermissions.Count -gt 0) {
-                $inboxFolderPermissions | Add-Member -Name UserPrincipalName -MemberType NoteProperty -Value ''
-                $inboxFolderPermissions | ForEach-Object {
-                    $_.UserPrincipalName = (Get-User $_.User -ErrorAction SilentlyContinue).UserPrincipalName
-                }
+        $inboxFolder = (((Get-MailboxFolderStatistics -Identity $currentMailbox.ExchangeGuid) | Where-Object { $_.FolderType -eq 'Inbox' }).FolderPath -replace '/', '')
+        $inboxFolderPermissions = Get-MailboxFolderPermission -Identity "$($currentMailbox.ExchangeGuid):\$($inboxFolder)" -ResultSize Unlimited -ErrorAction Stop | Where-Object { $_.User.DisplayName -ne 'Anonymous' -and $_.User.DisplayName -ne 'Default' -and $_.IsValid -eq $true }
+        if ($inboxFolderPermissions.Count -gt 0) {
+            $inboxFolderPermissions | Add-Member -Name PrimarySmtpAddress -MemberType NoteProperty -Value ''
+            $inboxFolderPermissions | ForEach-Object {
+                $_.PrimarySmtpAddress = (Get-Recipient $_.User -ErrorAction SilentlyContinue).PrimarySmtpAddress
             }
         }
     }
@@ -182,7 +193,7 @@ for ($i = 0; $i -lt $mailbox.count; $i++) {
     $sendOnBehalfPermissions = @(
         if ($currentMailbox.GrantSendOnBehalfTo.Count -gt 0) {
             foreach ($item in $currentMailbox.GrantSendOnBehalfTo) {
-                (Get-User -Identity $item).UserPrincipalName
+                    (Get-Recipient $item -ErrorAction SilentlyContinue).PrimarySmtpAddress
             }
         }
     )
@@ -190,19 +201,19 @@ for ($i = 0; $i -lt $mailbox.count; $i++) {
     $delegatesList = [System.Collections.ArrayList]@()
     $delegatesList.AddRange(@(($sendAsPermissions).Trustee))
     $delegatesList.AddRange(@(($mailboxPermissions).User))
-    $delegatesList.AddRange(@(($inboxFolderPermissions).UserPrincipalName))
+    $delegatesList.AddRange(@(($inboxFolderPermissions).PrimarySmtpAddress))
     $delegatesList.AddRange(@($sendOnBehalfPermissions))
+    # $delegatesList | Out-Default
 
-    if (!$delegatesList) {
-        "     -> Delegates: $($delegatesList.Count)" | Out-Default
-    }
+    # if (!$delegatesList) {
+    #     "     -> Delegates: $($delegatesList.Count)" | Out-Default
+    # }
 
     if ($delegatesList) {
         $delegatesList = $delegatesList | Sort-Object | Select-Object -Unique
-        "     -> Delegates: $($delegatesList.Count)" | Out-Default
+        # "     -> Delegates: $($delegatesList.Count)" | Out-Default
         $delegatesList | ForEach-Object {
             $currentDelegate = $_
-
             $hasSenderPermission = @()
             if (@($sendAsPermissions | Where-Object { $_.Trustee -eq $currentDelegate })) {
                 $hasSenderPermission += "SendAs"
@@ -212,29 +223,39 @@ for ($i = 0; $i -lt $mailbox.count; $i++) {
                 $hasSenderPermission += "SendOnBehalf"
             }
 
-            $hasInboxFolderPermission = @($inboxFolderPermissions | Where-Object { $_.UserPrincipalName -eq $currentDelegate })
+            $hasInboxFolderPermission = @($inboxFolderPermissions | Where-Object { $_.PrimarySmtpAddress -eq $currentDelegate })
             $hasMailboxPermission = @($mailboxPermissions | Where-Object { $_.User -eq $currentDelegate })
-
-
             $null = $result.Add(
                 $(
                     New-Object psobject -Property $(
                         [ordered]@{
-                            MailboxUPN        = $currentMailbox.UserPrincipalName
-                            DelegateUPN       = $currentDelegate
+                            Mailbox           = $currentMailbox.PrimarySmtpAddress
+                            # MailboxType       = $currentMailbox.RecipientTypeDetails
+                            MailboxType       = $(TextSplit $currentMailbox.RecipientTypeDetails)
+                            Delegate          = $currentDelegate
+                            DelegateType      = $(TextSplit (Get-Recipient -Identity $currentDelegate -ErrorAction SilentlyContinue).RecipientTypeDetails)
                             SenderPermission  = $(
                                 if ($hasSenderPermission) {
-                                    $hasSenderPermission -join ","
+                                    (TextSplit ($hasSenderPermission -join ","))
+                                }
+                                else {
+                                    'None'
                                 }
                             )
                             InboxPermission   = $(
                                 if ($hasInboxFolderPermission) {
-                                    $hasInboxFolderPermission.AccessRights -join ","
+                                    (TextSplit ($hasInboxFolderPermission.AccessRights -join ","))
+                                }
+                                else {
+                                    'None'
                                 }
                             )
                             MailboxPermission = $(
                                 if ($hasMailboxPermission) {
-                                    $hasMailboxPermission.AccessRights -join ","
+                                    (TextSplit ($hasMailboxPermission.AccessRights -join ","))
+                                }
+                                else {
+                                    'None'
                                 }
                             )
                         }
